@@ -214,6 +214,26 @@ class Complex:
                     x.add(s)
         return list(x)
     
+
+    def distance(self, edge_list: list) -> float:
+        """
+        Calcule la distance euclidienne totale pour une liste d'arêtes.
+        Chaque arête est représentée par son indice dans self.complex.simplices.
+        """
+        import math
+        total_distance = 0.0
+        for edge_index in edge_list:
+            edge = self.simplices[edge_index]
+            if edge.dimension() == 1:
+                a, b = edge.vertices # indices des points a et b
+                p_a = self.vertices[a]
+                p_b = self.vertices[b]
+                # Calcul de la distance euclidienne entre les points a et b
+                dist_ab = math.sqrt(sum((p_a[i] - p_b[i])**2 for i in range(3)))
+                total_distance += dist_ab
+        return total_distance
+
+
     def isCycle(self, chain: list) -> bool:
         """
         Détermine si une chaîne de simplexes (supposés être des arêtes) forme un cycle.
@@ -223,46 +243,78 @@ class Complex:
         # Parcours de chaque arête dans la chaîne
         for c in chain:
             edge = self.simplices[c]
-            # On vérifie que le simplexe est bien une arête (dimension 1)
-            if edge.dimension() != 1:
-                raise ValueError("La chaîne doit être composée d'arêtes (1-simplexes).")
             # Comptage des sommets de l'arête
             for v in edge.vertices:
                 boundary_counts[v] = boundary_counts.get(v, 0) + 1
                 
-        # Vérifier que chaque sommet apparaît un nombre pair de fois
+        # checking que chaque sommet apparaît un nombre pair de fois
         for count in boundary_counts.values():
             if count % 2 != 0:
                 return False
         return True
 
-    def sort_chain(self, chain):
+    def get_sorted_vertices(self, chain):
         """
-        Trie les arêtes de la chaîne pour que chaque arête ait un sommet en commun avec la précédente.
+        Trie les arêtes de la chaîne pour que chaque arête ait un sommet en commun avec la précédente,
+        puis reconstruit la chaîne ordonnée des sommets.
+        
+        La chaîne en entrée est une liste d'indices d'arêtes (1-simplexes). Pour la première arête,
+        on choisit l'orientation en fonction de la connexion avec la deuxième arête. Ensuite, pour chaque
+        arête suivante, on ajoute le sommet qui n'est pas identique au dernier sommet de la chaîne.
+        
+        Exemple :
+        Si les arêtes sont (a,b), (b,c), (c,d), la fonction retourne [a, b, c, d].
+        On va utiliser cette fct pour avoir la liste ordonnée des chemins et utiliser notre algorithme de calcul de plus court chemin en utilisant les graphes
         """
         if not chain:
             return []
-
-        sorted_chain = [chain[0]]
+        
+        # Première étape : trier les arêtes pour former une chaîne connectée.
+        sorted_edges = [chain[0]]
         remaining = set(chain[1:])
-
+        
         while remaining:
-            last_edge = self.simplices[sorted_chain[-1]]
+            last_edge = self.simplices[sorted_edges[-1]]
             last_vertices = set(last_edge.vertices)
-
             found = False
             for edge_index in list(remaining):
                 edge = self.simplices[edge_index]
                 if any(v in last_vertices for v in edge.vertices):
-                    sorted_chain.append(edge_index)
+                    sorted_edges.append(edge_index)
                     remaining.remove(edge_index)
                     found = True
                     break
+        
+        # Deuxième étape : reconstruire la liste ordonnée des sommets.
+        # Pour la première arête, on choisit l'orientation de manière à ce que son sommet commun
+        # avec la deuxième arête soit en position 1.
+        first_edge = self.simplices[sorted_edges[0]]
+        if len(sorted_edges) > 1:
+            second_edge = self.simplices[sorted_edges[1]]
+            common = set(first_edge.vertices).intersection(second_edge.vertices)
+            common_vertex = common.pop()
+            # On positionne le sommet commun en deuxième position.
+            if first_edge.vertices[0] == common_vertex:
+                sorted_vertices = [first_edge.vertices[1], first_edge.vertices[0]]
+            else:
+                sorted_vertices = [first_edge.vertices[0], first_edge.vertices[1]]
+        else:
+            # Si la chaîne ne contient qu'une seule arête, on retourne simplement ses deux sommets.
+            sorted_vertices = first_edge.vertices[:]
+        
+        # Pour chaque arête suivante, on ajoute le sommet qui n'est pas égal au dernier sommet courant.
+        for edge_index in sorted_edges[1:]:
+            current_edge = self.simplices[edge_index]
+            # Les arêtes sont des 1-simplexes et contiennent deux sommets.
+            if sorted_vertices[-1] in current_edge.vertices:
+                # On ajoute le sommet qui n'est pas égal au dernier sommet.
+                if current_edge.vertices[0] == sorted_vertices[-1]:
+                    sorted_vertices.append(current_edge.vertices[1])
+                else:
+                    sorted_vertices.append(current_edge.vertices[0])
+        
+        return sorted_vertices
 
-            if not found:
-                raise ValueError("Impossible d'ordonner la chaîne avec des arêtes connectées.")
-
-        return sorted_chain
     def display(self, chain=None):
         """
         Permet de visualiser le complexe avec la librairie pyVista
@@ -754,107 +806,106 @@ class ChainOptimization:
         
         return edge_chain
 
-    def find_shortest_path(self, A: int, C: int) -> list:
-        """
-        Construit un graphe à partir de toutes les arêtes (1-simplexes) du complexe,
-        puis utilise l'algorithme de Dijkstra pour trouver le plus court chemin entre
-        le sommet A et le sommet C, en pondérant chaque arête par la distance euclidienne.
-        
-        Retourne une liste d'indices de sommets qui représentent le chemin le plus court.
-        Si aucun chemin n'est trouvé, retourne une liste vide.
-        """
-        import networkx as nx
-        import numpy as np
-
-        G = nx.Graph()
-        # Parcourir tous les simplexes du complexe pour récupérer les arêtes
-        for simplex in self.complex.simplices:
-            if simplex.dimension() == 1:
-                u, v = simplex.vertices
-                p_u = np.array(self.complex.vertices[u])
-                p_v = np.array(self.complex.vertices[v])
-                weight = np.linalg.norm(p_u - p_v)
-                G.add_edge(u, v, weight=weight)
-        
-        try:
-            # Utiliser Dijkstra pour trouver le plus court chemin de A à C
-            path = nx.dijkstra_path(G, source=A, target=C, weight='weight')
-        except nx.NetworkXNoPath:
-            path = []
-        return path
+   
     def find_shortest_path(self, A: int, C: int) -> list:
         """
         Construit un graphe à partir des arêtes (1-simplexes) du complexe,
-        applique Dijkstra pour trouver le chemin le plus court entre A et C,
-        et retourne une liste d'arêtes connectées.
+        utilise l'algorithme de Dijkstra pour trouver le plus court chemin entre
+        le sommet A et le sommet C en la distance euclidienne comme poids.
         
-        Chaque arête est représentée par son indice dans self.simplices.
+        Retourne une liste d'indices d'arêtes qui représentent le chemin le plus court.
         Si aucun chemin n'est trouvé, retourne une liste vide.
         """
         import networkx as nx
         import numpy as np
 
         G = nx.Graph()
-        edge_map = {}  # Dictionnaire pour retrouver l'index de l'arête dans self.simplices
-
-        # Construire le graphe avec les arêtes pondérées par la distance euclidienne
+        edge_map = {}  # Permet d'associer chaque paire de sommets à l'indice de l'arête correspondante.
+        
+        # Construction du graphe à partir de toutes les arêtes du complexe.
         for i, simplex in enumerate(self.complex.simplices):
-            if simplex.dimension() == 1:  # Simplexe 1D = arête
-                u, v = simplex.vertices
-                p_u = np.array(self.complex.vertices[u])
-                p_v = np.array(self.complex.vertices[v])
-                weight = np.linalg.norm(p_u - p_v)
-                G.add_edge(u, v, weight=weight)
-                edge_map[(u, v)] = i
-                edge_map[(v, u)] = i  # Pour permettre un accès dans les deux directions
+            if simplex.dimension() == 1:  # On ne considère que les 1-simplexes (arêtes)
+                a, b = simplex.vertices
+                p_a = np.array(self.complex.vertices[a])
+                p_b = np.array(self.complex.vertices[b])
+                weight = np.linalg.norm(p_a - p_b) # j utilise la distance ecludienne comme poids
+                G.add_edge(a, b, weight=weight)
+                edge_map[(a, b)] = i
+                edge_map[(b, a)] = i  # Pour un accès dans les deux sens
 
         try:
-            # Trouver le plus court chemin sous forme de liste de sommets
+            # Utiliser Dijkstra pour trouver le chemin le plus court sous forme de liste de sommets.
             vertex_path = nx.dijkstra_path(G, source=A, target=C, weight='weight')
-
-            # Convertir la liste de sommets en liste d'arêtes connectées
-            edge_path = [edge_map[(vertex_path[i], vertex_path[i+1])] for i in range(len(vertex_path) - 1)]
-        
         except nx.NetworkXNoPath:
-            edge_path = []
+            return []
 
+        # Convertir la liste de sommets en liste d'arêtes grâce à l'edge_map.
+        edge_path = []
+        for j in range(len(vertex_path) - 1):
+            u = vertex_path[j]
+            v = vertex_path[j+1]
+            edge_index = edge_map.get((u, v))
+            if edge_index is None:
+                # Cette situation ne devrait normalement pas se produire.
+                continue
+            edge_path.append(edge_index)
         return edge_path
 
-    def process_edges(self, chain: list) -> list:
+    def minPathOptmisationStep(self, chain: list) -> list:
         """
-        Trouve un cycle en reliant les arêtes de 'chain' partageant un sommet.
-        Retourne uniquement les nouvelles arêtes ajoutées par l'optimisation.
-
-        Retourne : list[int] -> indices des nouvelles arêtes formant un cycle.
+        À partir d'une chaîne ordonnée de sommets (liste d'indices de sommets),
+        calcule le chemin le plus court (liste d'indices d'arêtes) entre le premier et le troisième sommet,
+        le troisième et le cinquième, etc.
+        De plus, ajoute le chemin le plus court entre l'avant-dernier et le premier sommet pour fermer le cycle.
+        Seules les arêtes qui ne font pas déjà partie du cycle original sont ajoutées.
         """
-        # Extraction des arêtes sous forme (v1, v2) 
-        edges = [tuple(self.complex.simplices[c].vertices)
-                for c in chain if self.complex.simplices[c].dimension() == 1]
-
+        # 1. Calculer les arêtes originales du cycle à partir des sommets consécutifs.
+        original_edges = set()
+        for i in range(len(chain) - 1):
+            edge_index = self._find_edge(chain[i], chain[i+1])
+            if edge_index is not None:
+                original_edges.add(edge_index)
+        # Si le cycle n'est pas fermé, on peut aussi vérifier l'arête fermante s'il y en a une.
+        if chain[0] != chain[-1]:
+            closing_edge = self._find_edge(chain[-1], chain[0])
+            if closing_edge is not None:
+                original_edges.add(closing_edge)
+        
         new_edges_set = set()
-
-        # Parcours des arêtes consécutives
-        for i in range(len(edges) - 1):
-            edge1 = edges[i]
-            edge2 = edges[i + 1]
-
-            # Trouver le sommet commun
-            common = set(edge1).intersection(edge2)
-            if common:
-                # A et C sont les sommets distincts
-                B = list(common)[0]
-                A = edge1[0] if edge1[0] != B else edge1[1]
-                C = edge2[0] if edge2[0] != B else edge2[1]
-
-                # Calculer le plus court chemin entre A et C
-                path = self.find_shortest_path(A, C)
-
-                # Ajouter les nouvelles arêtes qui ne sont pas déjà dans la chaîne initiale
-                for p in path:
-                    if p not in new_edges_set:
-                        new_edges_set.add(p)
-
+        # 2. Pour chaque paire de sommets (premier et troisième, troisième et cinquième, etc.)
+        for i in range(0, len(chain) - 2, 2):
+            u = chain[i]
+            v = chain[i+2]
+            edge_path = self.find_shortest_path(u, v)
+            for edge_idx in edge_path:
+                    new_edges_set.add(edge_idx)
+        
+        # 3. Ajout pour fermer le cycle : calculer le chemin le plus court entre l'avant-dernier et le premier sommet.
+        if len(chain) >= 2:
+            u = chain[-2]
+            v = chain[0]
+            edge_path = self.find_shortest_path(u, v)
+            for edge_idx in edge_path:
+                    new_edges_set.add(edge_idx)
+        
         return list(new_edges_set)
+
+    def minPathOptmisation(self,chain):
+        """
+        """
+        sorted_vertices = self.complex.get_sorted_vertices(chain) # liste des sommets ordonnées du cycle
+        oldDist = self.complex.distance(chain) # distance ecludienne totale des aretes du cycle actuel
+        cycle = self.minPathOptmisationStep(sorted_vertices) # on reduit le cycle en une étape
+
+        
+        while True: # tant qu on arrive à reduire le cycle alors on continue
+            sorted_vertices = self.complex.get_sorted_vertices(cycle)
+            cycle = self.minPathOptmisationStep(sorted_vertices)
+            dist = self.complex.distance(cycle)
+            if dist >= oldDist : # si ça ne s est pas amélioré après une étape alors on arête
+                break
+            oldDist = dist
+        return cycle
 
 if __name__ == "__main__":
     complex = Complex("data/socket.1.ele", "data/socket.1.node")
@@ -862,20 +913,19 @@ if __name__ == "__main__":
     # complex.write("simp_complex.json")
     # complex.write_surface()
 
-
+    # chaine initiale encerclant un trou (donné par le prof)
     chain = [7363, 16196, 16133, 25157, 7756, 7181, 13838, 7182, 9104, 8782, 11538, 21780, 18069, 8665, 7897, 11739, 18588, 24865, 3171, 23590, 23463, 9450, 21869, 2354, 5874, 13556, 6969]
     
-    op = complex.sort_chain(chain)
-    print("hum",op,len(op))
-    
     optim = ChainOptimization(complex)
+
+    cycle = optim.minPathOptmisation(chain)
+
     #v = optim.greedy(chain, True, True)
     #recuit_sm = optim.simulated_annealing(chain, True, True, 1000000)
     k = optim.optimize_cycle(chain, True, True)
     c = optim.optimize_cycle_global(chain,True,True)
-    l = optim.narrow(op)
-    m = optim.process_edges(op)
-    complex.display(m)
+    l = optim.narrow(c)
+    complex.display(cycle)
     #print("recuit simulé",recuit_sm,len(recuit_sm))
     #print("premiere approche",k,len(k))
 
