@@ -214,6 +214,15 @@ class Complex:
                     x.add(s)
         return list(x)
     
+    def findEdge(self, a: int, b: int) -> int:
+        """
+        Retourne l'indice de l'arête (1-simplexe) dans le complexe reliant les sommets a et b.
+        """
+        edge_vertices = sorted([a, b])
+        for simplex in self.simplices:
+            if simplex.dimension() == 1 and sorted(simplex.vertices) == edge_vertices:
+                return simplex.index
+        return None
 
     def distance(self, edge_list: list) -> float:
         """
@@ -253,66 +262,98 @@ class Complex:
                 return False
         return True
 
+    def gravityCenter(self, cycle: list) -> list:
+        """
+        Calcule le centre de gravité d'un cycle d'arêtes.
+        
+        Paramètre:
+        cycle : list[int]
+            Liste d'indices d'arêtes (1-simplexes) formant un cycle.
+        
+        Retourne:
+        list[float] : Coordonnées (x, y, z) du centre de gravité.
+        
+        La méthode procède en deux étapes :
+        1. Reconstruire la chaîne ordonnée des sommets via get_sorted_vertices.
+        2. Calculer la moyenne des coordonnées de ces sommets.
+            Si le cycle est fermé (premier sommet répété en fin), le sommet final est ignoré.
+        """
+        # Récupération de la liste ordonnée des sommets
+        vertices_cycle = self.get_sorted_vertices(cycle)
+        
+        # Si le cycle est fermé (le premier sommet est répété en fin), on l'enlève
+        if len(vertices_cycle) > 1 and vertices_cycle[0] == vertices_cycle[-1]:
+            vertices_cycle = vertices_cycle[:-1]
+        
+        # Calcul du centre de gravité en moyennant les coordonnées
+        center = [0.0, 0.0, 0.0]
+        for v in vertices_cycle:
+            coords = self.vertices[v]
+            center[0] += coords[0]
+            center[1] += coords[1]
+            center[2] += coords[2]
+        
+        n = len(vertices_cycle)
+        if n == 0:
+            return center
+        center = [c / n for c in center]
+        return center
+
+
     def get_sorted_vertices(self, chain):
         """
-        Trie les arêtes de la chaîne pour que chaque arête ait un sommet en commun avec la précédente,
-        puis reconstruit la chaîne ordonnée des sommets.
+        Trie les arêtes de la chaîne pour former une séquence ordonnée de sommets connectés.
         
-        La chaîne en entrée est une liste d'indices d'arêtes (1-simplexes). Pour la première arête,
-        on choisit l'orientation en fonction de la connexion avec la deuxième arête. Ensuite, pour chaque
-        arête suivante, on ajoute le sommet qui n'est pas identique au dernier sommet de la chaîne.
+        La chaîne en entrée est une liste d'indices d'arêtes (1-simplexes). On commence par une arête
+        quelconque et on la suit en enchaînant les sommets connectés, garantissant une orientation correcte.
+        
+        Retourne une liste ordonnée de sommets.
         
         Exemple :
         Si les arêtes sont (a,b), (b,c), (c,d), la fonction retourne [a, b, c, d].
-        On va utiliser cette fct pour avoir la liste ordonnée des chemins et utiliser notre algorithme de calcul de plus court chemin en utilisant les graphes
         """
         if not chain:
             return []
         
-        # Première étape : trier les arêtes pour former une chaîne connectée.
-        sorted_edges = [chain[0]]
-        remaining = set(chain[1:])
+        # Construire un dictionnaire sommet -> arêtes incidentes
+        vertex_to_edges = {}
+        for edge_idx in chain:
+            edge = self.simplices[edge_idx]
+            a, b = edge.vertices
+            vertex_to_edges.setdefault(a, []).append(edge_idx)
+            vertex_to_edges.setdefault(b, []).append(edge_idx)
+
+        # Trouver un sommet de départ (un sommet d'une extrémité si cycle ouvert, sinon n'importe lequel)
+        start_vertex = None
+        for v, edges in vertex_to_edges.items():
+            if len(edges) == 1:  # Un sommet d'extrémité
+                start_vertex = v
+                break
+        if start_vertex is None:  # Si c'est un cycle fermé, on prend un sommet arbitraire
+            start_vertex = next(iter(vertex_to_edges))
         
-        while remaining:
-            last_edge = self.simplices[sorted_edges[-1]]
-            last_vertices = set(last_edge.vertices)
-            found = False
-            for edge_index in list(remaining):
-                edge = self.simplices[edge_index]
-                if any(v in last_vertices for v in edge.vertices):
-                    sorted_edges.append(edge_index)
-                    remaining.remove(edge_index)
-                    found = True
+        # Reconstruction de la chaîne ordonnée des sommets
+        sorted_vertices = [start_vertex]
+        used_edges = set()
+        
+        while len(sorted_vertices) < len(chain) + 1:  # Nombre de sommets = nombre d'arêtes + 1
+            current_vertex = sorted_vertices[-1]
+            next_edge = None
+            
+            for edge_idx in vertex_to_edges.get(current_vertex, []):
+                if edge_idx not in used_edges:
+                    next_edge = edge_idx
                     break
-        
-        # Deuxième étape : reconstruire la liste ordonnée des sommets.
-        # Pour la première arête, on choisit l'orientation de manière à ce que son sommet commun
-        # avec la deuxième arête soit en position 1.
-        first_edge = self.simplices[sorted_edges[0]]
-        if len(sorted_edges) > 1:
-            second_edge = self.simplices[sorted_edges[1]]
-            common = set(first_edge.vertices).intersection(second_edge.vertices)
-            common_vertex = common.pop()
-            # On positionne le sommet commun en deuxième position.
-            if first_edge.vertices[0] == common_vertex:
-                sorted_vertices = [first_edge.vertices[1], first_edge.vertices[0]]
-            else:
-                sorted_vertices = [first_edge.vertices[0], first_edge.vertices[1]]
-        else:
-            # Si la chaîne ne contient qu'une seule arête, on retourne simplement ses deux sommets.
-            sorted_vertices = first_edge.vertices[:]
-        
-        # Pour chaque arête suivante, on ajoute le sommet qui n'est pas égal au dernier sommet courant.
-        for edge_index in sorted_edges[1:]:
-            current_edge = self.simplices[edge_index]
-            # Les arêtes sont des 1-simplexes et contiennent deux sommets.
-            if sorted_vertices[-1] in current_edge.vertices:
-                # On ajoute le sommet qui n'est pas égal au dernier sommet.
-                if current_edge.vertices[0] == sorted_vertices[-1]:
-                    sorted_vertices.append(current_edge.vertices[1])
-                else:
-                    sorted_vertices.append(current_edge.vertices[0])
-        
+            
+            if next_edge is None:
+                break  # Si on ne trouve plus d'arête à suivre, on arrête
+
+            used_edges.add(next_edge)
+            edge = self.simplices[next_edge]
+            a, b = edge.vertices
+            next_vertex = b if a == current_vertex else a
+            sorted_vertices.append(next_vertex)
+
         return sorted_vertices
 
     def display(self, chain=None):
@@ -358,40 +399,6 @@ class Complex:
 
         # Affichage interactif
         plotter.show()
-
-    def polyscopeView(self, chain):
-        """
-        Permet de visualiser le complexe en utilisant la librairie Polyscope.
-        Les faces sont affichées en transparence pour pouvoir voir la chaîne.
-        """
-        import polyscope as ps
-        import numpy as np
-
-        ps.init()
-
-        # Conversion des sommets et récupération des triangles (faces) de la surface
-        vertices = np.array(self.vertices)
-        triangles = np.array(self.surface())  # Chaque face doit être une liste de 3 indices
-
-        # Enregistrement du maillage de surface avec transparence
-        ps_mesh = ps.register_surface_mesh("Complexe", vertices, triangles)
-        ps_mesh.set_transparency(0.5)  
-
-        # Construction de la chaîne d'arêtes passée en paramètre (on prend uniquement les arêtes)
-        chain_edges = []
-        for edge_index in chain:
-            edge = self.simplices[edge_index]
-            if edge.dimension() == 1:
-                chain_edges.append(edge.vertices)
-        chain_edges = np.array(chain_edges)
-
-        # Enregistrement et affichage de la chaîne d'arêtes en rouge
-        ps_chain = ps.register_curve_network("cycle", vertices, chain_edges)
-        ps_chain.set_color((1, 0, 0))  # Couleur rouge
-
-        ps.show()
-
-
 class ChainOptimization:
     """Algorithms for computing a shorter homologuous cycle."""
     def __init__(self, complex: Complex):
@@ -566,247 +573,18 @@ class ChainOptimization:
                         matrix[k] = matrix[k].symmetric_difference(matrix[j])
         return [chains[j] for j in indices]
                     
-    def optimize_cycle(self, chain: list, cycle: bool = True, inside: bool = True) -> list:
+    def _find_edge(self, a: int, b: int) -> int:
         """
-        Notre premièere approche : optimisation locale
-        """
-        current_chain = set(chain)
-        improvement_found = True
-
-        while improvement_found:
-            improvement_found = False
-            best_chain = current_chain
-            best_length = len(current_chain)
-            
-            # Parcours de chaque simplex du cycle actuel
-            for s in current_chain:
-                if cycle:
-                    # Pour un cycle, on cherche dans la cobordure de s
-                    candidates = [t for t in self.complex.simplices[s].coboundary 
-                                  if self.complex.simplices[t].inside == inside]
-                else:
-                    # Pour un cocycle, on regarde dans le bord de s
-                    candidates = [t for t in self.complex.simplices[s].boundary 
-                                  if self.complex.simplices[t].inside == inside]
-
-                # Pour chaque candidat, on calcule la modification proposée
-                for t in candidates:
-                    if cycle:
-                        # On prend l'ensemble des faces de t qui sont dans le sous-complexe concerné
-                        candidate_faces = set(u for u in self.complex.simplices[t].boundary 
-                                              if self.complex.simplices[u].inside == inside)
-                    else:
-                        # Pour un cocycle, on prend la cobordure de t
-                        candidate_faces = set(u for u in self.complex.simplices[t].coboundary 
-                                              if self.complex.simplices[u].inside == inside)
-                    
-                    # La nouvelle chaîne est la différence symétrique entre la chaîne courante et candidate_faces
-                    new_chain = current_chain.symmetric_difference(candidate_faces)
-                    
-                    # Si la nouvelle chaîne est strictement plus courte, on la retient comme meilleure amélioration
-                    if len(new_chain) < best_length:
-                        best_length = len(new_chain)
-                        best_chain = new_chain
-                        improvement_found = True
-            
-            # On met à jour la chaîne courante si une amélioration a été trouvée
-            if improvement_found:
-                current_chain = best_chain
-        
-        return list(current_chain)
-
-    def optimize_cycle_global(self, chain: list, cycle: bool = True, inside: bool = True) -> list:
-        """
-        Optimise un cycle (ou cocycle) donné par une liste d'indices de simplexes, 
-        en essayant de trouver le minimum global. 
-        Si aucune amélioration locale n'est trouvée pendant un certain nombre d'itérations,
-        une perturbation aléatoire est appliquée pour sortir du minimum local.
-        """
-        current_chain = set(chain)
-        best_chain = current_chain.copy()
-        best_length = len(current_chain)
-        
-        # Paramètres pour la recherche globale
-        max_iter = 100000      # nombre maximum d'itérations globales
-        max_no_improve = 5  # nombre d'itérations sans amélioration avant perturbation
-        no_improve_count = 0
-
-        for iteration in range(max_iter):
-            improvement_found = False
-            
-            # Recherche locale : parcourir chaque simplex dans la chaîne actuelle
-            for s in list(current_chain):
-                # Sélectionner les candidats selon le type de chaîne
-                if cycle:
-                    candidates = [t for t in self.complex.simplices[s].coboundary 
-                                if self.complex.simplices[t].inside == inside]
-                else:
-                    candidates = [t for t in self.complex.simplices[s].boundary 
-                                if self.complex.simplices[t].inside == inside]
-                
-                # Pour chaque candidat, calculer la modification proposée
-                for t in candidates:
-                    if cycle:
-                        candidate_faces = set(u for u in self.complex.simplices[t].boundary 
-                                                if self.complex.simplices[u].inside == inside)
-                    else:
-                        candidate_faces = set(u for u in self.complex.simplices[t].coboundary 
-                                                if self.complex.simplices[u].inside == inside)
-                    
-                    # Nouvelle chaîne obtenue par différence symétrique
-                    new_chain = current_chain.symmetric_difference(candidate_faces)
-                    
-                    # Si la nouvelle chaîne est strictement plus courte, c'est une amélioration
-                    if len(new_chain) < len(current_chain):
-                        current_chain = new_chain
-                        improvement_found = True
-                        break  # on sort de la boucle sur les candidats
-                
-                if improvement_found:
-                    break  # on recommence la recherche locale avec la nouvelle chaîne
-
-            if improvement_found:
-                no_improve_count = 0  # réinitialiser le compteur d'itérations sans amélioration
-                if len(current_chain) < best_length:
-                    best_chain = current_chain.copy()
-                    best_length = len(current_chain)
-            else:
-                no_improve_count += 1
-            
-            # Si aucune amélioration n'est trouvée depuis longtemps, on effectue une perturbation
-            if no_improve_count >= max_no_improve:
-                # Choix aléatoire d'un simplex dans la chaîne actuelle
-                s = random.choice(list(current_chain))
-                if cycle:
-                    candidates = [t for t in self.complex.simplices[s].coboundary 
-                                if self.complex.simplices[t].inside == inside]
-                else:
-                    candidates = [t for t in self.complex.simplices[s].boundary 
-                                if self.complex.simplices[t].inside == inside]
-                if candidates:
-                    t = random.choice(candidates)
-                    if cycle:
-                        candidate_faces = set(u for u in self.complex.simplices[t].boundary 
-                                                if self.complex.simplices[u].inside == inside)
-                    else:
-                        candidate_faces = set(u for u in self.complex.simplices[t].coboundary 
-                                                if self.complex.simplices[u].inside == inside)
-                    # La perturbation est effectuée en prenant la différence symétrique
-                    current_chain = current_chain.symmetric_difference(candidate_faces)
-                no_improve_count = 0  # réinitialiser le compteur
-            
-        # Retourne la meilleure solution trouvée
-        return list(best_chain)
-    def _find_edge(self, v1: int, v2: int) -> int:
-        """
-        Retourne l'indice d'une arête (1-simplexe) dans le complexe reliant les sommets v1 et v2.
+        Retourne l'indice de l'arête (1-simplexe) dans le complexe reliant les sommets a et b.
         Les sommets de l'arête sont comparés dans l'ordre croissant.
+        Si aucune arête n'est trouvée, retourne None.
         """
-        edge_vertices = sorted([v1, v2])
+        edge_vertices = sorted([a, b])
         for simplex in self.complex.simplices:
             if simplex.dimension() == 1 and sorted(simplex.vertices) == edge_vertices:
                 return simplex.index
         return None
 
-    def narrow(self, chain: list) -> list:
-        """
-        Améliore (resserre) un cycle donné par une liste d'indices d'arêtes,
-        en cherchant à remplacer des portions du cycle par des arêtes directes
-        dont le milieu est plus proche du centroïde du cycle, ce qui devrait
-        rapprocher le cycle du trou.
-
-        Retourne une nouvelle liste d'indices d'arêtes représentant le cycle resserré.
-        """
-        import math
-
-        # 1. Reconstruction du cycle de sommets à partir de la chaîne d'arêtes.
-        # On ne considère que les arêtes (1-simplexes).
-        edges = [tuple(self.complex.simplices[c].vertices) 
-                for c in chain if self.complex.simplices[c].dimension() == 1]
-
-        # Construire un dictionnaire d'adjacence à partir des arêtes.
-        adj = {}
-        for (u, v) in edges:
-            adj.setdefault(u, []).append(v)
-            adj.setdefault(v, []).append(u)
-        
-        # reconstruction du cycle
-        start = edges[0][0]
-        cycle_vertices = [start]
-        current = start
-        prev = None
-        while True:
-            next_vertex = None
-            for n in adj[current]:
-                if n != prev:
-                    next_vertex = n
-                    break
-            if next_vertex is None or next_vertex == start:
-                break
-            cycle_vertices.append(next_vertex)
-            prev, current = current, next_vertex
-        # Fermer le cycle
-        if cycle_vertices[0] != cycle_vertices[-1]:
-            cycle_vertices.append(cycle_vertices[0])
-        
-        # 2. Calcul du centroïde (approximatif centre du trou) en ignorant le dernier sommet redondant.
-        coords = [self.complex.vertices[v] for v in cycle_vertices[:-1]]
-        n = len(coords)
-        centroid = [sum(c[i] for c in coords) / n for i in range(3)]
-        
-        # Fonction utilitaire pour la distance euclidienne entre deux points en 3D.
-        def dist(p, q):
-            return math.sqrt(sum((p[i] - q[i]) ** 2 for i in range(3)))
-        
-        # Fonction qui calcule le point milieu entre deux points.
-        def midpoint(p, q):
-            return [(p[i] + q[i]) / 2 for i in range(3)]
-        
-        # 3. Itération pour "narrow" le cycle.
-        improved = True
-        new_cycle = cycle_vertices[:-1]  # cycle sans la répétition finale
-        while improved:
-            improved = False
-            L = len(new_cycle)
-            # Pour chaque paire de sommets non consécutifs (mais pas la connexion finale)
-            for i in range(L):
-                for j in range(i + 2, L):
-                    if i == 0 and j == L - 1:
-                        continue  # ne pas rompre la fermeture du cycle
-                    # Vérifier s'il existe une arête directe entre new_cycle[i] et new_cycle[j].
-                    if self._find_edge(new_cycle[i], new_cycle[j]) is not None:
-                        # Calcul du "milieu moyen" de la portion actuelle du cycle allant de i à j.
-                        segment_midpoints = []
-                        for k in range(i, j):
-                            p1 = self.complex.vertices[new_cycle[k]]
-                            p2 = self.complex.vertices[new_cycle[k + 1]]
-                            segment_midpoints.append(midpoint(p1, p2))
-                        avg_mid = [sum(m[l] for m in segment_midpoints) / len(segment_midpoints) for l in range(3)]
-                        # Milieu de l'arête directe proposée.
-                        p_direct1 = self.complex.vertices[new_cycle[i]]
-                        p_direct2 = self.complex.vertices[new_cycle[j]]
-                        direct_mid = midpoint(p_direct1, p_direct2)
-                        # Si le milieu direct est plus proche du centroïde que le milieu moyen actuel,
-                        # alors on remplace la portion du cycle par un raccourci direct.
-                        if dist(direct_mid, centroid) < dist(avg_mid, centroid):
-                            new_cycle = new_cycle[:i+1] + new_cycle[j:]
-                            improved = True
-                            break
-                if improved:
-                    break
-        # fermeture pour obtenir un cycle
-        if new_cycle[0] != new_cycle[-1]:
-            new_cycle.append(new_cycle[0])
-        
-        # conversion du cycle de sommets en chaîne d'arêtes.
-        edge_chain = []
-        for i in range(len(new_cycle) - 1):
-            edge_index = self._find_edge(new_cycle[i], new_cycle[i+1])
-            edge_chain.append(edge_index)
-        
-        return edge_chain
-
-   
     def find_shortest_path(self, A: int, C: int) -> list:
         """
         Construit un graphe à partir des arêtes (1-simplexes) du complexe,
@@ -824,7 +602,7 @@ class ChainOptimization:
         
         # Construction du graphe à partir de toutes les arêtes du complexe.
         for i, simplex in enumerate(self.complex.simplices):
-            if simplex.dimension() == 1:  # On ne considère que les 1-simplexes (arêtes)
+            if simplex.dimension() == 1 and simplex.inside:  # On ne considère que les 1-simplexes (arêtes)
                 a, b = simplex.vertices
                 p_a = np.array(self.complex.vertices[a])
                 p_b = np.array(self.complex.vertices[b])
@@ -851,45 +629,48 @@ class ChainOptimization:
             edge_path.append(edge_index)
         return edge_path
 
-    def minPathOptmisationStep(self, chain: list) -> list:
+    def minPathOptmisationStep(self, chain: list, jump: int = 3) -> list:
         """
         À partir d'une chaîne ordonnée de sommets (liste d'indices de sommets),
-        calcule le chemin le plus court (liste d'indices d'arêtes) entre le premier et le troisième sommet,
-        le troisième et le cinquième, etc.
-        De plus, ajoute le chemin le plus court entre l'avant-dernier et le premier sommet pour fermer le cycle.
-        Seules les arêtes qui ne font pas déjà partie du cycle original sont ajoutées.
+        calcule le chemin le plus court (liste d'indices d'arêtes) entre chaque sommet et celui
+        situé 'jump' positions plus loin dans l'ordre.
+        
+        Si le cycle n'est pas fermé (le premier sommet n'est pas répété en fin), il est fermé.
+        Lorsqu'on atteint la fin, le segment relie le dernier sommet au premier.
+        
+        Paramètres:
+        chain : list[int]
+            Liste ordonnée des indices de sommets formant le cycle.
+        jump : int, optionnel (par défaut 3)
+            Nombre de positions à sauter pour définir le segment à optimiser.
+            Par exemple, jump=3 signifie qu'on relie le sommet 0 au sommet 3, 
+            le sommet 3 au sommet 6, etc.
+        
+        Retourne:
+        list[int] : Liste des indices d'arêtes (1-simplexes) obtenue en concaténant les chemins
+        les plus courts entre les paires de sommets ainsi déterminées.
         """
-        # 1. Calculer les arêtes originales du cycle à partir des sommets consécutifs.
-        original_edges = set()
-        for i in range(len(chain) - 1):
-            edge_index = self._find_edge(chain[i], chain[i+1])
-            if edge_index is not None:
-                original_edges.add(edge_index)
-        # Si le cycle n'est pas fermé, on peut aussi vérifier l'arête fermante s'il y en a une.
+        # S'assurer que le cycle est fermé
         if chain[0] != chain[-1]:
-            closing_edge = self._find_edge(chain[-1], chain[0])
-            if closing_edge is not None:
-                original_edges.add(closing_edge)
+            chain.append(chain[0])
         
-        new_edges_set = set()
-        # 2. Pour chaque paire de sommets (premier et troisième, troisième et cinquième, etc.)
-        for i in range(0, len(chain) - 2, 2):
+        n = len(chain) - 1  # nombre de sommets uniques (sans la répétition finale)
+        new_edges = []
+        i = 0
+        while i < n:
+            target = i + jump
+            if target >= n:
+                target = 0  # fermer le cycle en reliant au premier sommet
             u = chain[i]
-            v = chain[i+2]
+            v = chain[target]
             edge_path = self.find_shortest_path(u, v)
-            for edge_idx in edge_path:
-                    new_edges_set.add(edge_idx)
-        
-        # 3. Ajout pour fermer le cycle : calculer le chemin le plus court entre l'avant-dernier et le premier sommet.
-        if len(chain) >= 2:
-            u = chain[-2]
-            v = chain[0]
-            edge_path = self.find_shortest_path(u, v)
-            for edge_idx in edge_path:
-                    new_edges_set.add(edge_idx)
-        
-        return list(new_edges_set)
+            new_edges.extend(edge_path)
+            i += jump
+        return new_edges
 
+
+
+    
     def minPathOptmisation(self,chain):
         """
         """
@@ -897,15 +678,82 @@ class ChainOptimization:
         oldDist = self.complex.distance(chain) # distance ecludienne totale des aretes du cycle actuel
         cycle = self.minPathOptmisationStep(sorted_vertices) # on reduit le cycle en une étape
 
-        
         while True: # tant qu on arrive à reduire le cycle alors on continue
             sorted_vertices = self.complex.get_sorted_vertices(cycle)
-            cycle = self.minPathOptmisationStep(sorted_vertices)
+            cycle = self.minPathOptmisationStep(sorted_vertices,3)
             dist = self.complex.distance(cycle)
             if dist >= oldDist : # si ça ne s est pas amélioré après une étape alors on arête
                 break
             oldDist = dist
         return cycle
+    
+    def approachCycleToCenter(self, cycle: list) -> list:
+        """
+        Raffine un cycle en approchant ses arêtes vers le centre de gravité.
+        
+        Pour chaque paire consécutive de sommets dans le cycle (obtenu via get_sorted_vertices),
+        la fonction cherche un triangle (2-simplexe) contenant ces deux sommets dont le troisième
+        sommet (x) est plus proche du centre de gravité du cycle que l'un des deux sommets (a ou b).
+        
+        Si un tel triangle est trouvé, le cycle est mis à jour en prenant la différence symétrique
+        entre le cycle actuel et le bord de ce triangle, ce qui revient à "ajouter" le triangle.
+        
+        Paramètre:
+        cycle : list[int]
+            Liste d'indices d'arêtes (1-simplexes) formant le cycle.
+        
+        Retourne:
+        list[int] : Liste d'indices d'arêtes formant le cycle raffiné.
+        """
+        import numpy as np
+
+        # Calculer le centre de gravité du cycle (la méthode utilise get_sorted_vertices en interne)
+        center = self.complex.gravityCenter(cycle)
+        
+        # Récupérer la liste ordonnée des sommets du cycle
+        sorted_vertices = self.complex.get_sorted_vertices(cycle)
+        
+        # Représenter le cycle courant sous forme d'ensemble d'arêtes (pour faciliter la modification)
+        current_cycle = set(cycle)
+        
+        improved = False
+        # Parcourir chaque paire consécutive de sommets dans le cycle
+        for i in range(len(sorted_vertices) - 1):
+            a = sorted_vertices[i]
+            b = sorted_vertices[i + 1]
+            # Examiner tous les triangles du complexe
+            for simplex in self.complex.simplices:
+                if simplex.dimension() == 2:
+                    verts = simplex.vertices
+                    # Vérifier que le triangle contient bien a et b
+                    if a in verts and b in verts:
+                        # Déterminer le troisième sommet (x) du triangle
+                        third = [v for v in verts if v != a and v != b]
+                        if not third:
+                            continue
+                        x = third[0]
+                        # Calculer la distance du centre aux points a, b et x
+                        coords_center = np.array(center)
+                        dist_a = np.linalg.norm(np.array(self.complex.vertices[a]) - coords_center)
+                        dist_b = np.linalg.norm(np.array(self.complex.vertices[b]) - coords_center)
+                        dist_x = np.linalg.norm(np.array(self.complex.vertices[x]) - coords_center)
+                        # Si x est plus proche du centre que a ou b, on considère ce triangle
+                        if dist_x < dist_a or dist_x < dist_b:
+                            # Récupérer les indices des arêtes du triangle
+                            tri_edges = set()
+                            for pair in [(verts[0], verts[1]), (verts[1], verts[2]), (verts[0], verts[2])]:
+                                edge_idx = self.complex.findEdge(pair[0], pair[1])
+                                if edge_idx is not None:
+                                    tri_edges.add(edge_idx)
+                            # Mettre à jour le cycle : la différence symétrique ajoute le triangle
+                            current_cycle = current_cycle.symmetric_difference(tri_edges)
+                            improved = True
+                            # On passe au segment suivant dès qu'un triangle est ajouté pour celui-ci
+                            break
+        if improved:
+            return list(current_cycle)
+        else:
+            return cycle
 
 if __name__ == "__main__":
     complex = Complex("data/socket.1.ele", "data/socket.1.node")
@@ -918,13 +766,19 @@ if __name__ == "__main__":
     
     optim = ChainOptimization(complex)
 
+    print("longueur initiale ",complex.distance(chain))
     cycle = optim.minPathOptmisation(chain)
+    cycle = optim.approachCycleToCenter(cycle)
+    cycle = optim.minPathOptmisation(cycle)
+    cycle = optim.approachCycleToCenter(cycle)
+    cycle = optim.minPathOptmisation(cycle)
+    print("longeur après optimisation",len(cycle),complex.distance(cycle))
 
     #v = optim.greedy(chain, True, True)
     #recuit_sm = optim.simulated_annealing(chain, True, True, 1000000)
-    k = optim.optimize_cycle(chain, True, True)
-    c = optim.optimize_cycle_global(chain,True,True)
-    l = optim.narrow(c)
+
+    #k = optim.optimize_cycle(chain, True, True)
+    #c = optim.optimize_cycle_global(chain,True,True)
     complex.display(cycle)
     #print("recuit simulé",recuit_sm,len(recuit_sm))
     #print("premiere approche",k,len(k))
