@@ -399,6 +399,8 @@ class Complex:
 
         # Affichage interactif
         plotter.show()
+
+
 class ChainOptimization:
     """Algorithms for computing a shorter homologuous cycle."""
     def __init__(self, complex: Complex):
@@ -585,51 +587,57 @@ class ChainOptimization:
                 return simplex.index
         return None
 
+
+
     def find_shortest_path(self, A: int, C: int) -> list:
         """
-        Construit un graphe à partir des arêtes (1-simplexes) du complexe,
-        utilise l'algorithme de Dijkstra pour trouver le plus court chemin entre
-        le sommet A et le sommet C en la distance euclidienne comme poids.
+        Construit un graphe à partir des arêtes (1-simplexes) du complexe en utilisant
+        uniquement les arêtes marquées comme 'inside', et applique l'algorithme de Dijkstra
+        pour trouver le plus court chemin (en terme de distance euclidienne) entre le sommet A et le sommet C.
         
-        Retourne une liste d'indices d'arêtes qui représentent le chemin le plus court.
-        Si aucun chemin n'est trouvé, retourne une liste vide.
+        Après calcul, la fonction vérifie que toutes les arêtes du chemin sont bien 'inside'.
+        Si une arête qui ne respecte pas ce critère est rencontrée, la fonction retourne une liste vide.
+        
+        Retourne:
+        list[int] : Liste d'indices d'arêtes formant le chemin le plus court, ou [] si aucun chemin valable n'est trouvé.
         """
         import networkx as nx
         import numpy as np
 
         G = nx.Graph()
-        edge_map = {}  # Permet d'associer chaque paire de sommets à l'indice de l'arête correspondante.
+        edge_map = {}  # Association de chaque paire de sommets à l'indice de l'arête correspondante.
         
-        # Construction du graphe à partir de toutes les arêtes du complexe.
+        # Construction du graphe : on ajoute uniquement les arêtes marquées comme 'inside'.
         for i, simplex in enumerate(self.complex.simplices):
-            if simplex.dimension() == 1 and simplex.inside:  # On ne considère que les 1-simplexes (arêtes)
+            if simplex.dimension() == 1 and simplex.inside:
                 a, b = simplex.vertices
                 p_a = np.array(self.complex.vertices[a])
                 p_b = np.array(self.complex.vertices[b])
-                weight = np.linalg.norm(p_a - p_b) # j utilise la distance ecludienne comme poids
+                weight = np.linalg.norm(p_a - p_b)
                 G.add_edge(a, b, weight=weight)
                 edge_map[(a, b)] = i
-                edge_map[(b, a)] = i  # Pour un accès dans les deux sens
+                edge_map[(b, a)] = i  # Permet un accès bidirectionnel
 
         try:
-            # Utiliser Dijkstra pour trouver le chemin le plus court sous forme de liste de sommets.
+            # Calcul du chemin le plus court sous forme de liste de sommets.
             vertex_path = nx.dijkstra_path(G, source=A, target=C, weight='weight')
         except nx.NetworkXNoPath:
             return []
 
-        # Convertir la liste de sommets en liste d'arêtes grâce à l'edge_map.
+        # Conversion du chemin de sommets en liste d'arêtes, avec vérification du critère 'inside'.
         edge_path = []
         for j in range(len(vertex_path) - 1):
             u = vertex_path[j]
             v = vertex_path[j+1]
             edge_index = edge_map.get((u, v))
             if edge_index is None:
-                # Cette situation ne devrait normalement pas se produire.
-                continue
+                # Normalement, cela ne devrait pas se produire.
+                return []
             edge_path.append(edge_index)
+        
         return edge_path
 
-    def minPathOptmisationStep(self, chain: list, jump: int = 3) -> list:
+    def minPathOptmisationStep(self, chain: list, jump: int = 2) -> list:
         """
         À partir d'une chaîne ordonnée de sommets (liste d'indices de sommets),
         calcule le chemin le plus court (liste d'indices d'arêtes) entre chaque sommet et celui
@@ -641,7 +649,7 @@ class ChainOptimization:
         Paramètres:
         chain : list[int]
             Liste ordonnée des indices de sommets formant le cycle.
-        jump : int, optionnel (par défaut 3)
+        jump : int, optionnel (par défaut 2)
             Nombre de positions à sauter pour définir le segment à optimiser.
             Par exemple, jump=3 signifie qu'on relie le sommet 0 au sommet 3, 
             le sommet 3 au sommet 6, etc.
@@ -649,13 +657,9 @@ class ChainOptimization:
         Retourne:
         list[int] : Liste des indices d'arêtes (1-simplexes) obtenue en concaténant les chemins
         les plus courts entre les paires de sommets ainsi déterminées.
-        """
-        # S'assurer que le cycle est fermé
-        if chain[0] != chain[-1]:
-            chain.append(chain[0])
-        
+        """        
         n = len(chain) - 1  # nombre de sommets uniques (sans la répétition finale)
-        new_edges = []
+        new_edges = set()
         i = 0
         while i < n:
             target = i + jump
@@ -664,23 +668,14 @@ class ChainOptimization:
             u = chain[i]
             v = chain[target]
             edge_path = self.find_shortest_path(u, v)
-            new_edges.extend(edge_path)
+            for j in edge_path:
+                new_edges.add(j)
             i += jump
-        return new_edges
+        if len(list(new_edges)) < 3 : 
+            return chain
+        return list(new_edges)
 
-
-
-    
-    def is_homologous(self, new_cycle: list, original_cycle: list) -> bool:
-        """
-        Vérifie que new_cycle est homologué à original_cycle.
-        """
-        new_inside = sum(1 for e in new_cycle if self.complex.simplices[e].inside)
-        orig_inside = sum(1 for e in original_cycle if self.complex.simplices[e].inside)
-        return new_inside == orig_inside
-
-
-    def minPathOptmisation(self, chain: list) -> list:
+    def minPathOptmisation(self, chain: list,jump = 2) -> list:
         """
         Optimise un cycle en réduisant sa distance euclidienne totale, tout en
         s'assurant que la nouvelle chaîne d'arêtes respecte l'homologie du cycle original.
@@ -695,17 +690,17 @@ class ChainOptimization:
         # Récupérer la liste ordonnée des sommets du cycle initial
         sorted_vertices = self.complex.get_sorted_vertices(chain)
         oldDist = self.complex.distance(chain)  # distance totale des arêtes du cycle actuel
+        test = self.evaluate(chain,True)
         # On applique une première étape d'optimisation (paramétrée par jump)
-        cycle = self.minPathOptmisationStep(sorted_vertices)  
+        cycle = self.minPathOptmisationStep(sorted_vertices,jump)  
 
         while True:
             # Reconstruire la liste ordonnée des sommets à partir du cycle courant
             sorted_vertices = self.complex.get_sorted_vertices(cycle)
-            # Appliquer une étape d'optimisation avec un saut plus court (ici jump=2)
-            new_cycle = self.minPathOptmisationStep(sorted_vertices,jump=2)
+            new_cycle = self.minPathOptmisationStep(sorted_vertices,jump)
             dist = self.complex.distance(new_cycle)
             # On met à jour le cycle uniquement s'il améliore la distance ET respecte l'homologie
-            if dist >= oldDist or not self.is_homologous(new_cycle, cycle):
+            if dist >= oldDist: #or not self.is_homologous(new_cycle, cycle):
                 break
             oldDist = dist
             cycle = new_cycle
@@ -717,53 +712,72 @@ class ChainOptimization:
         Approche les arêtes d'un cycle vers le centre de gravité.
         
         Pour chaque paire consécutive de sommets dans le cycle (obtenu via get_sorted_vertices),
-        la fonction cherche un triangle (2-simplexe) contenant ces deux sommets dont le troisième
-        sommet (x) est plus proche du centre de gravité du cycle que l'un des deux sommets (a ou b).
+        la fonction vérifie, dans le coboundary de l'arête reliant ces deux sommets, s'il existe
+        un triangle (2-simplexe) dont le troisième sommet (x) est plus proche du centre de gravité
+        du cycle que l'un des deux sommets (a ou b).
         
-        Si un tel triangle est trouvé, le cycle est mis à jour en prenant la différence symétrique
-        entre le cycle actuel et le bord de ce triangle, ce qui revient à "ajouter" le triangle.
-        
+        Avant d'appliquer la mise à jour, on vérifie que le triangle candidat (et donc ses arêtes)
+        est entièrement marqué comme "inside". S'il n'est pas entièrement inside, la configuration
+        précédente est conservée.
         """
         import numpy as np
 
-        center = self.complex.gravityCenter(cycle) 
-        
-        sorted_vertices = self.complex.get_sorted_vertices(cycle) # les sommets tries
+        # Calcul du centre de gravité du cycle.
+        center = self.complex.gravityCenter(cycle)
+        # Obtenir la liste ordonnée des sommets du cycle.
+        sorted_vertices = self.complex.get_sorted_vertices(cycle)
+        # Représenter le cycle courant comme un ensemble d'arêtes.
         current_cycle = set(cycle)
         improved = False
-        # Parcourir chaque paire consécutive de sommets dans le cycle
+
+        # Parcourir chaque paire consécutive de sommets dans le cycle.
         for i in range(len(sorted_vertices) - 1):
             a = sorted_vertices[i]
             b = sorted_vertices[i + 1]
-            # Examiner tous les triangles du complexe
-            for simplex in self.complex.simplices:
-                if simplex.dimension() == 2:
-                    verts = simplex.vertices
-                    # Vérifier que le triangle contient bien a et b
-                    if a in verts and b in verts:
-                        # Déterminer le troisième sommet (x) du triangle
-                        third = [v for v in verts if v != a and v != b]
-                        if not third:
+            # Trouver l'arête reliant a et b.
+            edge_index = self.complex.findEdge(a, b)
+            if edge_index is None:
+                continue
+
+            # Parcourir les triangles dans le coboundary de l'arête (a, b).
+            for tri_index in self.complex.simplices[edge_index].coboundary:
+                triangle = self.complex.simplices[tri_index]
+                if triangle.dimension() != 2:
+                    continue
+                # Vérifier que le triangle contient bien a et b.
+                verts = triangle.vertices
+                if a in verts and b in verts:
+                    # Identifier le troisième sommet x.
+                    third = [v for v in verts if v != a and v != b]
+                    if not third:
+                        continue
+                    x = third[0]
+                    # Calculer les distances du centre aux points a, b et x.
+                    coords_center = np.array(center)
+                    dist_a = np.linalg.norm(np.array(self.complex.vertices[a]) - coords_center)
+                    dist_b = np.linalg.norm(np.array(self.complex.vertices[b]) - coords_center)
+                    dist_x = np.linalg.norm(np.array(self.complex.vertices[x]) - coords_center)
+                    # Si x est plus proche du centre que a ou b, considérer ce triangle.
+                    if dist_x < dist_a or dist_x < dist_b:
+                        # Récupérer les arêtes formant le triangle.
+                        tri_edges = set()
+                        valid_candidate = True
+                        for pair in [(verts[0], verts[1]), (verts[1], verts[2]), (verts[0], verts[2])]:
+                            edge_idx = self.complex.findEdge(pair[0], pair[1])
+                            # Vérifier que l'arête existe et qu'elle est marquée comme inside.
+                            if edge_idx is None or not self.complex.simplices[edge_idx].inside:
+                                valid_candidate = False
+                                break
+                            tri_edges.add(edge_idx)
+                        # Si toutes les arêtes du triangle sont inside, on peut l'utiliser pour améliorer le cycle.
+                        if not valid_candidate:
                             continue
-                        x = third[0]
-                        # la distance du centre aux points a, b et x
-                        coords_center = np.array(center)
-                        dist_a = np.linalg.norm(np.array(self.complex.vertices[a]) - coords_center)
-                        dist_b = np.linalg.norm(np.array(self.complex.vertices[b]) - coords_center)
-                        dist_x = np.linalg.norm(np.array(self.complex.vertices[x]) - coords_center)
-                        # Si x est plus proche du centre que a ou b, on considère ce triangle
-                        if dist_x < dist_a or dist_x < dist_b:
-                            # indices des arêtes du triangle
-                            tri_edges = set()
-                            for pair in [(verts[0], verts[1]), (verts[1], verts[2]), (verts[0], verts[2])]:
-                                edge_idx = self.complex.findEdge(pair[0], pair[1])
-                                if edge_idx is not None:
-                                    tri_edges.add(edge_idx)
-                            # Mise à jour du cycle : la différence symétrique ajoute le triangle
-                            current_cycle = current_cycle.symmetric_difference(tri_edges)
-                            improved = True
-                            # on passe au segment suivant dès qu'un triangle est ajouté pour celui-ci
-                            break
+                        # Mise à jour du cycle par différence symétrique :
+                        # les arêtes communes sont retirées, les autres sont ajoutées.
+                        current_cycle = current_cycle.symmetric_difference(tri_edges)
+                        improved = True
+                        # Passer au segment suivant dès qu'un triangle est ajouté pour cette arête.
+                        break
         if improved:
             return list(current_cycle)
         else:
@@ -784,7 +798,6 @@ class ChainOptimization:
         prev_distance = self.complex.distance(chain)
         cycle = chain[:]
         iteration = 0
-        print("Longueur initiale :", prev_distance)
         
         while True:
             iteration += 1
@@ -792,7 +805,6 @@ class ChainOptimization:
             candidate = self.approachCycleToCenter(candidate)
             candidate = self.minPathOptmisation(candidate)
             current_distance = self.complex.distance(candidate)
-            print(f"Itération {iteration} : distance = {current_distance}")
             
             if current_distance < prev_distance:
                 cycle = candidate
@@ -800,7 +812,6 @@ class ChainOptimization:
             else:
                 break
                 
-        print("Longueur finale :", prev_distance, "après", iteration, "itérations.")
         return cycle
 
 
@@ -814,20 +825,22 @@ if __name__ == "__main__":
     chain = [7363, 16196, 16133, 25157, 7756, 7181, 13838, 7182, 9104, 8782, 11538, 21780, 18069, 8665, 7897, 11739, 18588, 24865, 3171, 23590, 23463, 9450, 21869, 2354, 5874, 13556, 6969]
     
     optim = ChainOptimization(complex)
-
-    """print("longueur initiale ",complex.distance(chain))
-    cycle = optim.minPathOptmisation(chain)
-    cycle = optim.approachCycleToCenter(cycle)
-    cycle = optim.minPathOptmisation(cycle)
-    cycle = optim.approachCycleToCenter(cycle)
-    cycle = optim.minPathOptmisation(cycle)
-    print("longeur après optimisation",len(cycle),complex.distance(cycle))"""
     cycle = optim.calculate_minimum_cycle(chain)
+    cycle = optim.approachCycleToCenter(cycle)
+    cycle = optim.minPathOptmisation(cycle,3)
+    cycle = optim.approachCycleToCenter(cycle)
+    cycle = optim.minPathOptmisation(cycle)
+    cycle = optim.approachCycleToCenter(cycle)
+    cycle = optim.minPathOptmisation(cycle)
+    cycle = optim.approachCycleToCenter(cycle)
+    cycle = optim.minPathOptmisation(cycle)
+
+
 
     #v = optim.greedy(chain, True, True)
-    recuit_sm = optim.simulated_annealing(cycle, True, True, 100000)
+    #recuit_sm = optim.simulated_annealing(chain, True, True, 10000000)
 
-    complex.display(recuit_sm)
+    complex.display(cycle)
     #print("recuit simulé",recuit_sm,len(recuit_sm))
 
     # en partant deux aretes incidentes 
