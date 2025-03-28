@@ -297,7 +297,7 @@ class Complex:
         if not chain:
             return []
         
-        # Construire un dictionnaire sommet -> arêtes incidentes
+        # un dictionnaire sommet -> arêtes incidentes
         vertex_to_edges = {}
         for edge_idx in chain:
             edge = self.simplices[edge_idx]
@@ -305,7 +305,7 @@ class Complex:
             vertex_to_edges.setdefault(a, []).append(edge_idx)
             vertex_to_edges.setdefault(b, []).append(edge_idx)
 
-        # Trouver un sommet de départ (un sommet d'une extrémité si cycle ouvert, sinon n'importe lequel)
+        # recherche un sommet de départ (un sommet d'une extrémité si cycle ouvert, sinon n'importe lequel)
         start_vertex = None
         for v, edges in vertex_to_edges.items():
             if len(edges) == 1:  # Un sommet d'extrémité
@@ -378,7 +378,7 @@ class Complex:
                         # Affichage en bleu avec une épaisseur plus importante pour bien distinguer
                         plotter.add_mesh(line, color="blue", line_width=4)
 
-        # Affichage interactif
+        # Affichage
         plotter.show()
 
     def is_boundary_edge(self, edge_index: int) -> bool:
@@ -763,11 +763,8 @@ class ChainOptimization:
         """
         import numpy as np
 
-        # Calculer le centre de gravité du cycle.
         center = self.complex.gravityCenter(cycle)
-        # Obtenir la séquence ordonnée des sommets du cycle initial.
         vertices = self.complex.get_sorted_vertices(cycle)
-        # Initialiser la nouvelle liste d'arêtes.
         new_edges = []
 
         n = len(vertices)
@@ -781,12 +778,12 @@ class ChainOptimization:
                 continue
             replaced = False
 
-            # Utiliser la coboundary de l'arête pour obtenir les triangles incidents.
+            # utilsation de la coboundary de l'arête pour obtenir les triangles incidents.
             for tri_idx in self.complex.simplices[edge_ab].coboundary:
                 triangle = self.complex.simplices[tri_idx]
                 if triangle.dimension() != 2:
                     continue
-                # Vérifier que le triangle contient bien a et b.
+                # verification que le triangle contient bien a et b.
                 if a in triangle.vertices and b in triangle.vertices:
                     # Identifier le troisième sommet x.
                     third = [v for v in triangle.vertices if v not in [a, b]]
@@ -797,7 +794,7 @@ class ChainOptimization:
                     # dans la liste initiale des sommets (ce qui indiquerait que l'on crée un sous-cycle).
                     if x in vertices:
                         continue
-                    # Calculer les distances entre le centre et a, b et x.
+                    # calcul des distances entre le centre et a, b et x.
                     dist_a = np.linalg.norm(np.array(self.complex.vertices[a]) - np.array(center))
                     dist_b = np.linalg.norm(np.array(self.complex.vertices[b]) - np.array(center))
                     dist_x = np.linalg.norm(np.array(self.complex.vertices[x]) - np.array(center))
@@ -860,10 +857,12 @@ if __name__ == "__main__":
 
     # chaine initiale encerclant un trou (donné par le prof)
     chain = [7363, 16196, 16133, 25157, 7756, 7181, 13838, 7182, 9104, 8782, 11538, 21780, 18069, 8665, 7897, 11739, 18588, 24865, 3171, 23590, 23463, 9450, 21869, 2354, 5874, 13556, 6969]
-    chain = [2432, 9345, 12037, 25414, 1672, 11465, 586, 587, 3216, 17874, 6867, 13460, 6871, 3548, 5031, 16169, 4332, 5168, 14961, 20659, 8693]
     optim = ChainOptimization(complex)
-    cycle = optim.calculate_minimum_cycle(chain)
-    #recuit_sm = optim.simulated_annealing(chain, True, True, 100000)
+
+    cycle = optim.calculate_minimum_cycle(chain) # notre algo optimale (combine toute les méthodes compactage et chemins courts)
+
+    print("longeur du cycle après optimisation",complex.distance(cycle))
+    #recuit_sm = optim.simulated_annealing(chain, True, True, 100000) # recuit simulé du prof (pas optimale)
     complex.display(cycle)
     #print("recuit simulé",recuit_sm,len(recuit_sm))
 
